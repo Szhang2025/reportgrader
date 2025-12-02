@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Project Report Grader</title>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.449/build/pdf.mjs"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            min-height: 100vh;
+        }
+        .card {
+            max-width: 900px;
+            margin: 30px auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+        header {
+            background: #4f46e5;
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        header h1 { margin: 0; font-size: 2.5em; }
+        .content { padding: 40px; }
+        .box {
+            background: #f8fafc;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            border-left: 6px solid #4f46e5;
+        }
+        input[type="password"], input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover { background: #4338ca; }
+        #result {
+            display: none;
+            background: #ecfdf5;
+            padding: 30px;
+            border-radius: 12px;
+            border: 2px solid #10b981;
+            margin-top: 30px;
+        }
+        #score-display {
+            font-size: 80px;
+            font-weight: bold;
+            text-align: center;
+            color: #1e40af;
+        }
+        #status { margin-top: 15px; font-style: italic; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <header>
+            <h1>AI Project Report Grader</h1>
+            <p>Instant feedback & score using real GPT-4o</p>
+        </header>
+        <div class="content">
+            <div class="box">
+                <h3>Step 1: Enter Your OpenAI API Key</h3>
+                <input type="password" id="api-key" placeholder="sk-XXXXXXXXXXXXXXXXXXXXXXXX">
+                <button onclick="saveKey()">Save Key</button>
+                <small style="display:block;margin-top:8px;">
+                    Get free key → <a href="https://platform.openai.com/api-keys" target="_blank" style="color:#4f46e5">platform.openai.com/api-keys</a>
+                </small>
+            </div>
+
+            <div class="box">
+                <h3>Step 2: Upload Your Project Report (PDF)</h3>
+                <input type="file" id="pdf-file" accept=".pdf">
+                <button onclick="analyze()">Analyze with AI</button>
+                <div id="status"></div>
+            </div>
+
+            <div id="result">
+                <h2 style="text-align:center;">Your Score</h2>
+                <div id="score-display">0</div>
+                <h3>Detailed Feedback</h3>
+                <div id="feedback"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.449/build/pdf.mjs';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.449/build/pdf.worker.mjs';
+
+        function saveKey() {
+            const key = document.getElementById('api-key').value.trim();
+            if (key) {
+                localStorage.setItem('openai_key', key);
+                alert('Key saved!');
+            }
+        }
+
+        async function extractText(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let text = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                content.items.forEach(item => text += item.str + ' ');
+            }
+            return text.trim();
+        }
+
+        async function analyze() {
+            const fileInput = document.getElementById('pdf-file');
+            const file = fileInput.files[0];
+            if (!file) return alert('Please select a PDF');
+            const key = localStorage.getItem('openai_key');
+            if (!key) return alert('Please save your OpenAI API key first');
+
+            document.getElementById('status').innerHTML = 'Extracting text...';
+            document.getElementById('result').style.display = 'none';
+
+            try {
+                const text = await extractText(file);
+                if (text.length < 100) throw new Error('No text found in PDF (maybe scanned image?)');
+
+                document.getElementById('status').innerHTML = 'Sending to AI... (10-20 sec)';
+
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${key}`
+                    },
+                    body: JSON.stringify({
+ '{
+                        "model": "gpt-4o-mini",
+                        "temperature": 0.3,
+                        "messages": [
+                            {"role": "system", "content": "You are a professor grading a project report. Respond ONLY with:\nSCORE: XX/100\n\nFEEDBACK:\n• Point 1\n• Point 2\netc."},
+                            {"role": "user", "content": "Grade this report:\n\n" + text.substring(0, 60000)}
+                        ]
+                    }')
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error?.message || 'API error');
+
+                const output = data.choices[0].message.content;
+                const score = output.match(/SCORE:\s*(\d+)/i)[1];
+                const feedback = output.split('FEEDBACK:')[1]?.trim();
+
+                document.getElementById('score-display').textContent = score;
+                document.getElementById('feedback').textContent = feedback.replace(/•/g, '•');
+                document.getElementById('result').style.display = 'block';
+                document.getElementById('status').innerHTML = 'Done!';
+
+            } catch (e) {
+                alert('Error: ' + e.message);
+                document.getElementById('status').innerHTML = '';
+            }
+        }
+    </script>
+</body>
+</html>
